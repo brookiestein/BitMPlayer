@@ -27,6 +27,9 @@ class MainWindow : public QMainWindow
     QStringList m_filenames;
     std::map<QString, QString> m_splittedSongs;
     QString m_musicPlaying;
+    /* Hack to set the last music that were playing when the user opens more songs */
+    QString m_lastMusicPlaying;
+    float m_lastTimePlayed;
     unsigned int m_musicCount;
     bool m_firstTime;
     float m_streamLength;

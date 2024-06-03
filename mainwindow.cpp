@@ -19,7 +19,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
     ui->playingEdit->setToolTip(tr("If you wrote the file path yourself, press enter afterwards."));
-    ui->horizontalSlider->setToolTip(tr("Seek music to a certain position."));
+    ui->playedTimeSlider->setToolTip(tr("Seek music to a certain position."));
     ui->repeatCheckBox->setToolTip(tr("Current music does not repeat."));
 
     m_playlist = new Playlist(this);
@@ -50,7 +50,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->previousButton, &QPushButton::clicked, this, &MainWindow::onPreviousButtonClicked);
     connect(ui->nextButton, &QPushButton::clicked, this, &MainWindow::onNextButtonClicked);
     connect(ui->repeatCheckBox, &QCheckBox::clicked, this, &MainWindow::onRepeatCheckBoxClicked);
-    connect(ui->horizontalSlider, &QSlider::sliderReleased, this, &MainWindow::onSliderReleased);
+    connect(ui->playedTimeSlider, &QSlider::sliderReleased, this, &MainWindow::onSliderReleased);
 
     m_musicTimer.setInterval(1); /* Update every millisecond. This helps to get a smooth music update */
     m_sliderTimer.setInterval(1'000); /* Update slider every second */
@@ -97,18 +97,33 @@ void MainWindow::onListWidgetActionClicked(bool triggered)
 
     /* Working with remove from playlist action */
     auto filename = index.data().toString();
-    m_filenames.removeOne(filename);
+    auto path = m_splittedSongs[filename];
+    m_filenames.removeOne(QString("%1%2%3").arg(path, QDir::separator(), filename));
+    m_splittedSongs.erase(filename);
     ui->listWidget->model()->removeRow(index.row());
 
-    if (m_musicPlaying == filename) {
+    /* Because m_musicPlaying holds the full file path of the currently playing music
+     * and the list view just shows the filename.
+     */
+    auto idx = m_musicPlaying.lastIndexOf('/');
+    auto musicPlayingFilename = m_musicPlaying.mid(idx + 1, m_musicPlaying.size());
+
+    if (musicPlayingFilename == filename) {
         stopMusic();
         if (ui->playingEdit->text() == filename) {
             ui->playingEdit->setText("");
         }
-    }
 
-    if (m_musicCount > index.row()) {
-        m_musicCount = index.row();
+        if (m_musicCount > index.row()) {
+            m_musicCount = index.row();
+        }
+
+        setMusic(m_musicCount);
+        ui->listWidget->setCurrentRow(m_musicCount);
+        /* TODO: Check if setMusic() shall ui->playingEdit->setText() */
+        idx = m_musicPlaying.lastIndexOf('/');
+        musicPlayingFilename = m_musicPlaying.mid(idx + 1, m_musicPlaying.size());
+        ui->playingEdit->setText(musicPlayingFilename);
     }
 }
 
@@ -158,8 +173,8 @@ void MainWindow::onSavePlaylistButtonClicked()
 void MainWindow::resetControllers(bool resetLength, bool resetPlayingEdit)
 {
     ui->playPauseButton->setText(tr("Play"));
-    ui->horizontalSlider->setSingleStep(0);
-    ui->horizontalSlider->setValue(0);
+    ui->playedTimeSlider->setSingleStep(0);
+    ui->playedTimeSlider->setValue(0);
     ui->timePlayedLabel->setText("0s");
 
     if (resetLength)
@@ -209,8 +224,8 @@ void MainWindow::setMusic(unsigned int number)
     }
 
     ui->lengthLabel->setText(text);
-    ui->horizontalSlider->setMaximum(maximum);
-    ui->horizontalSlider->setValue(0);
+    ui->playedTimeSlider->setMaximum(maximum);
+    ui->playedTimeSlider->setValue(0);
 }
 
 void MainWindow::playMusic()
@@ -226,6 +241,16 @@ void MainWindow::stopMusic(bool resetLength, bool resetPlayingEdit)
 {
     m_musicTimer.stop();
     m_sliderTimer.stop();
+
+    /* ResumeMusicStream for StopMusicStream to work properly.
+     * If user pauses the song and afterward stops it, GetMusicTimePlayed
+     * will return the last time played rather than 0.0f which is the
+     * correct value taking in account that what we actually want is stop the song.
+     * In other words, reset it.
+     */
+    if (not IsMusicStreamPlaying(m_music))
+        ResumeMusicStream(m_music);
+
     StopMusicStream(m_music);
     resetControllers(resetLength, resetPlayingEdit);
     m_firstTime = true;
@@ -337,18 +362,30 @@ void MainWindow::onOpenFileButtonClicked()
         m_filenames.append(file);
     }
 
-    /* FIXME: When you write the filepath yourself, and then use the open files button
-     * the song continues to be the first one, but the listWidget gets sorted, and
-     * playingEdit changes to the opened file.
-     */
-
+    m_filenames.sort();
     splitSongs();
-    if (not m_musicPlaying.isEmpty())
+
+    bool restoreTimePlayed {};
+    if (not m_musicPlaying.isEmpty()) {
+        m_lastMusicPlaying = m_musicPlaying;
+        m_lastTimePlayed = GetMusicTimePlayed(m_music);
+        m_musicCount = m_filenames.indexOf(m_lastMusicPlaying);
         stopMusic(false, false);
+        restoreTimePlayed = true;
+    }
+
     setMusicNamesToListWidget();
     setMusic(m_musicCount);
     setMusicNameToEdit();
     ui->listWidget->setCurrentRow(m_filenames.indexOf(m_musicPlaying));
+
+    if (restoreTimePlayed) {
+        SeekMusicStream(m_music, m_lastTimePlayed);
+        int timePlayed = static_cast<int>(m_lastTimePlayed);
+        ui->playedTimeSlider->setValue(timePlayed);
+        setTimePlayedText(timePlayed);
+        playMusic();
+    }
 }
 
 void MainWindow::onClosePlaylistButtonClicked()
@@ -375,7 +412,7 @@ void MainWindow::onClosePlaylistButtonClicked()
 void MainWindow::onPlayPauseButtonClicked()
 {
     static bool isTheFirstTime {true};
-    if (m_filenames.isEmpty()) {
+    if (m_filenames.isEmpty() or not IsMusicReady(m_music)) {
         QMessageBox::warning(this, tr("Warning"), tr("No song has been loaded."));
         return;
     }
@@ -487,7 +524,7 @@ void MainWindow::onMusicTimeout()
 
 void MainWindow::onSliderTimeout()
 {
-    ui->horizontalSlider->setValue(ui->horizontalSlider->value() + 1);
+    ui->playedTimeSlider->setValue(ui->playedTimeSlider->value() + 1);
 }
 
 void MainWindow::onSliderReleased()
@@ -496,7 +533,7 @@ void MainWindow::onSliderReleased()
         return;
     }
 
-    int value = ui->horizontalSlider->value();
+    int value = ui->playedTimeSlider->value();
 
     setTimePlayedText(value);
     SeekMusicStream(m_music, static_cast<float>(value));

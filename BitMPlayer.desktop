@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=BitMPlayer
+Exec=/usr/local/bin/BitMPlayer
+Type=Application
+Categories=Multimedia;
+Icon=/usr/local/share/BitMPlayer/assets/logo.png
+Comment=Music Player written in C++ & Qt.
+Terminal=false
+StartupNotify=true

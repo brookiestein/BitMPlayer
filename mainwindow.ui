@@ -20,7 +20,7 @@
    <string>BitMPlayer</string>
   </property>
   <property name="windowIcon">
-   <iconset resource="resources.qrc">
+   <iconset>
     <normaloff>:/assets/logo.ico</normaloff>:/assets/logo.ico</iconset>
   </property>
   <widget class="QWidget" name="centralwidget">
@@ -128,7 +128,7 @@
            </widget>
           </item>
           <item>
-           <widget class="QSlider" name="horizontalSlider">
+           <widget class="QSlider" name="playedTimeSlider">
             <property name="orientation">
              <enum>Qt::Orientation::Horizontal</enum>
             </property>
@@ -230,8 +230,6 @@
    </property>
   </action>
  </widget>
- <resources>
-  <include location="resources.qrc"/>
- </resources>
+ <resources/>
  <connections/>
 </ui>
